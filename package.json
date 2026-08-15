@@ -1,0 +1,19 @@
+{
+  "name": "openclaw-clone",
+  "module": "index.ts",
+  "type": "module",
+  "private": true,
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "@clack/core": "^1.4.3",
+    "@clack/prompts": "^1.7.0",
+    "@types/node": "^26.2.0",
+    "commander": "^15.0.0",
+    "figlet": "^1.11.4"
+  }
+}
