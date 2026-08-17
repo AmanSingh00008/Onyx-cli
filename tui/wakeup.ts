@@ -1,4 +1,5 @@
 import { isCancel, select } from "@clack/prompts";
+import { runcliMode } from "../modes/cli.ts";
 
 function printBannerWithShadow() {
   const banner = [
@@ -21,21 +22,25 @@ function printBannerWithShadow() {
 export async function runwakeup(): Promise<void> {
   printBannerWithShadow();
 
-  const mode = await select({
-    message: "Choose a mode",
-    options: [
-      { value: "cli", label: "CLI" },
-      { value: "telegram", label: "Telegram" },
-    ],
-  });
+  while (true) {
+    const mode = await select({
+      message: "Choose a mode",
+      options: [
+        { value: "cli", label: "CLI" },
+        { value: "telegram", label: "Telegram" },
+        { value: "exit", label: "Exit" },
+      ],
+    });
 
-  if (isCancel(mode)) {
-    process.exit(0);
-  }
+    if (isCancel(mode) || mode === "exit") {
+      console.log("Exiting...");
+      process.exit(0);
+    }
 
-  if (mode === "cli") {
-    console.log("CLI mode selected");
-  } else if (mode === "telegram") {
-    console.log("Telegram mode selected");
+    if (mode === "cli") {
+      await runcliMode();
+    } else if (mode === "telegram") {
+      console.log("Telegram mode selected");
+    }
   }
 }
