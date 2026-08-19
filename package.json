@@ -23,6 +23,7 @@
     "commander": "^15.0.0",
     "diff": "^9.0.0",
     "figlet": "^1.11.4",
+    "firecrawl": "^4.32.2",
     "marked": "^18.0.10",
     "marked-terminal": "^7.3.0"
   }
