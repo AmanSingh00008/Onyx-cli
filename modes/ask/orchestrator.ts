@@ -1,136 +1,135 @@
-import { select, isCancel } from "@clack/prompts";
 import chalk from "chalk";
-import type { ActionTracker } from "./action-tracker.ts";
-import type { ActionLog } from "./types.ts";
-import { composeBeforeAfter, formatPatch } from "./diff-view.ts";
+import { confirm, isCancel, text } from "@clack/prompts";
+import { ToolLoopAgent, stepCountIs, tool } from "ai";
+import { z } from "zod";
+import { getAgentModel } from "../../ai/ai.config.ts";
+import { ActionTracker } from "../agent/action-tracker.ts";
+import { ToolExecutor } from "../agent/tool-executor.ts";
+import { defaultAgentConfig } from "../agent/types.ts";
 import { renderTerminalMarkdown } from "../../tui/terminal-md.ts";
+import { runApprovalFlow } from "../agent/approval.ts";
+import { createWebTools } from "../plan/web-tools.ts";
 
-interface ReviewGroup {
-  label: string;
-  actionIds: string[];
-  patch: string | null;
+function createAskTools(executor: ToolExecutor) {
+  return {
+    read_file: tool({
+      description:
+        "Read a text file from the workspace. Use a path relative to the project root.",
+      inputSchema: z.object({
+        path: z.string().describe("Relative file path"),
+      }),
+      execute: async ({ path: p }) => executor.readFile(p),
+    }),
+
+    list_files: tool({
+      description: "List files and directories under a path.",
+      inputSchema: z.object({
+        path: z.string(),
+        recursive: z.boolean().optional().default(false),
+      }),
+      execute: async ({ path: p, recursive }) =>
+        executor.listFiles(p, recursive),
+    }),
+
+    search_files: tool({
+      description:
+        'Find files matching a glob pattern (e.g. "*.ts", "**/*.md"). Optional content substring filter.',
+      inputSchema: z.object({
+        root: z.string().describe("Directory to search, relative to root"),
+        pattern: z
+          .string()
+          .describe("Glob-like pattern using * and ** (forward slashes)"),
+        content_contains: z.string().optional(),
+      }),
+      execute: async ({ root, pattern, content_contains }) =>
+        executor.searchFiles(root, pattern, content_contains),
+    }),
+
+    analyze_codebase: tool({
+      description:
+        "Summarize structure: file counts, size, extensions. Read-only.",
+      inputSchema: z.object({
+        path: z.string().default("."),
+      }),
+      execute: async ({ path: p }) => executor.analyzeCodebase(p),
+    }),
+
+    list_skills: tool({
+      description:
+        "List absolute paths to SKILL.md files under configured skill directories (Cursor / Claude).",
+      inputSchema: z.object({}),
+      execute: async () => executor.listSkills(),
+    }),
+
+    read_skill: tool({
+      description:
+        "Read a SKILL.md file. Path must be absolute and under skill roots, or use a path returned by list_skills.",
+      inputSchema: z.object({
+        path: z.string(),
+      }),
+      execute: async ({ path: p }) => executor.readSkill(p),
+    }),
+  };
 }
 
-function groupPending(pending: ActionLog[]): ReviewGroup[] {
-  const byPath = new Map<string, ActionLog[]>();
-  const shells: ActionLog[] = [];
-
-  for (const a of pending) {
-    if (a.type === "tool_execute") {
-      shells.push(a);
-      continue;
-    }
-    const key = a.path;
-    if (!byPath.has(key)) byPath.set(key, []);
-    byPath.get(key)!.push(a);
-  }
-
-  const groups: ReviewGroup[] = [];
-
-  const pathEntries = [...byPath.entries()].sort(([a], [b]) =>
-    a.localeCompare(b),
-  );
-  for (const [p, acts] of pathEntries) {
-    const sorted = acts.sort(
-      (x, y) => x.timestamp.getTime() - y.timestamp.getTime(),
-    );
-    const ids = sorted.map((x) => x.id);
-
-    if (sorted.every((x) => x.type === "folder_create")) {
-      groups.push({
-        label: `Create folder: ${p}`,
-        actionIds: ids,
-        patch: null,
-      });
-      continue;
-    }
-
-    const { before, after } = composeBeforeAfter(sorted);
-    const patch = formatPatch(p, before, after);
-    const kinds = [...new Set(sorted.map((x) => x.type))].join(", ");
-    groups.push({ label: `${p} (${kinds})`, actionIds: ids, patch });
-  }
-
-  for (const s of shells) {
-    groups.push({
-      label: `Shell: ${s.details.command ?? "(no command)"}`,
-      actionIds: [s.id],
-      patch: null,
-    });
-  }
-
-  return groups;
+function asMd(question: string, answer: string): string {
+  return `# Ask Mode\n\n## Question\n\n${question.trim()}\n\n## Answer\n\n${answer.trim()}\n`;
 }
 
-export async function runApprovalFlow(
-  tracker: ActionTracker,
-): Promise<boolean> {
-  const pending = tracker.getPendingMutations();
+export async function runAskMode() {
+  console.log(chalk.bold("\n❓ Ask Mode\n"));
 
-  if (pending.length === 0) {
-    console.log(
-      chalk.dim("\nNo staged file, folder, or shell changes to review.\n"),
-    );
-    return false;
-  }
+  const question = await text({ message: "What do you want to ask?" });
+  if (isCancel(question) || !question.trim()) return;
 
-  const choice = await select({
-    message: "Apply staged changes?",
-    options: [
-      { value: "all", label: "Approve and apply all" },
-      { value: "select", label: "Review one by one" },
-      { value: "cancel", label: "Cancel" },
-    ],
+  const config = defaultAgentConfig();
+  config.tools.allowFileCreation = true;
+  config.tools.allowFileModification = false;
+  config.tools.allowFolderCreation = false;
+  config.tools.allowShellExecution = false;
+
+  const tracker = new ActionTracker();
+  const executor = new ToolExecutor(tracker, config);
+
+
+  const tools = {
+    ...createAskTools(executor),
+    ...createWebTools(tracker)
+  };
+
+  const agent = new ToolLoopAgent({
+    model: getAgentModel(),
+    stopWhen: stepCountIs(20),
+    tools,
   });
 
-  if (isCancel(choice) || choice === "cancel") {
-    for (const a of pending) tracker.updateStatus(a.id, "rejected", false);
-    return false;
-  }
+  const result = await agent.generate({ prompt: question.trim() });
+  const answer = result.text?.trim() || "(no answer)";
+  console.log("\n" + renderTerminalMarkdown(answer) + "\n");
 
-  if (choice === "all") {
-    for (const a of pending) tracker.updateStatus(a.id, "approved", true);
-    return true;
-  }
+  const wantsSave = await confirm({
+    message:"Save this answer to a .md file in the current directory?",
+    initialValue:false,
+  });
+  if (isCancel(wantsSave) || !wantsSave) return;
 
-  for (const g of groupPending(pending)) {
-    while (true) {
-      const opt = await select({
-        message: chalk.bold(g.label),
-        options: [
-          { value: "accept", label: "Accept" },
-          { value: "diff", label: "Show diff", hint: g.patch ? "" : "N/A" },
-          { value: "reject", label: "Reject" },
-        ],
-      });
+  const filename = await text({
+    message:"Filename",
+    initialValue:"ask.md",
+     validate: (v) => {
+      const s = (v ?? '').trim();
+      if (!s) return 'Required';
+      if (s.includes('..') || s.includes('/') || s.includes('\\')) return 'No paths';
+      if (!s.toLowerCase().endsWith('.md')) return 'Must end with .md';
+    },
+  })
 
-      if (isCancel(opt)) {
-        for (const a of pending) tracker.updateStatus(a.id, "rejected", false);
-        return false;
-      }
+  if(isCancel(filename)) return;
 
-      if (opt === "diff") {
-        if (g.patch) {
-          console.log(
-            "\n" +
-              renderTerminalMarkdown("```diff\n" + g.patch + "\n```\n") +
-              "\n",
-          );
-        }
+  executor.createFile(filename , asMd(question , answer));
+  const ok = await runApprovalFlow(tracker);
+  if(!ok) return executor.clearStaging();
 
-        continue;
-      }
-
-      for (const id of g.actionIds) {
-        tracker.updateStatus(
-          id,
-          opt === "accept" ? "approved" : "rejected",
-          opt === "accept",
-        );
-      }
-      break;
-    }
-  }
-
-  return tracker.getActions().some((a) => a.status === "approved");
+  executor.applyApprovedFromTracker();
+  executor.clearStaging();
 }
