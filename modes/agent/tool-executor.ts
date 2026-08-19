@@ -91,7 +91,7 @@ export class ToolExecutor {
     }
     const text = fs.readFileSync(abs, "utf8");
     this.tracker.log({
-      type: "code_analysis",
+      Actiontype: "code_analysis",
       path: this.norm(rel),
       details: { after: text, toolName: "read_file" },
       status: "executed",
@@ -290,7 +290,7 @@ export class ToolExecutor {
 
     const summary = `Files: ${files} | Directories: ${dirs}`;
     this.tracker.log({
-      type: "code_analysis",
+      Actiontype: "code_analysis",
       path: this.norm(rootRel),
       details: { after: summary, toolName: "analyze_codebase" },
       status: "executed",
@@ -302,7 +302,7 @@ export class ToolExecutor {
     if (!this.config.tools.allowShellExecution)
       throw new Error("Shell execution disabled");
     this.tracker.log({
-      type: "tool_execute",
+      Actiontype: "tool_execute",
       path: "shell",
       details: { command, toolName: "execute_shell" },
       status: "pending",
@@ -336,7 +336,7 @@ export class ToolExecutor {
     }
     const out = lines.sort().join("\n");
     this.tracker.log({
-      type: "code_analysis",
+      Actiontype: "code_analysis",
       path: "skills",
       details: { after: out || "(none)", toolName: "list_skills" },
       status: "executed",
@@ -355,7 +355,7 @@ export class ToolExecutor {
     if (!allowed) throw new Error("read_skill: outside skill roots");
     const text = fs.readFileSync(abs, "utf8");
     this.tracker.log({
-      type: "code_analysis",
+      Actiontype: "code_analysis",
       path: abs,
       details: { after: text, toolName: "read_skill" },
       status: "executed",
@@ -368,7 +368,7 @@ export class ToolExecutor {
     const all = [...this.tracker.getActions()];
 
     for (const a of all.filter(
-      (x) => x.type === "folder_create" && x.status === "approved",
+      (x) => x.type === "folder create" && x.status === "approved",
     )) {
       try {
         fs.mkdirSync(this.resolveSafe(a.path), { recursive: true });
@@ -422,8 +422,8 @@ export class ToolExecutor {
     return { errors };
   }
 
-  clearStaging():void{
-    this.overlay.clear()
-    this.deleted.clear()
+  clearStaging(): void {
+    this.overlay.clear();
+    this.deleted.clear();
   }
 }
