@@ -2,12 +2,12 @@ import { isCancel, text } from "@clack/prompts";
 import chalk from "chalk";
 import { defaultAgentConfig } from "./types";
 import { ActionTracker } from "./action-tracker";
-import { ToolExecutor } from "./tool-executor";
+import { ToolExecutor } from "./tool-executor.ts";
 import { createAgentTools } from "./agent-tools";
 import { stepCountIs, ToolLoopAgent } from "ai";
 import { getAgentModel } from "../../ai";
-import { renderTerminalMarkdown } from "../../tui/terminal-md";
-import { runApprovalFlow } from "./approval";
+import { renderTerminalMarkdown } from "../../tui/terminal-md.ts";
+import { runApprovalFlow } from "./approval.ts";
 
 export async function runAgentMode() {
   console.log(chalk.bold("\n🤖 Agent Mode\n"));
